@@ -1,0 +1,32 @@
+/* 消息滚动区域：占满剩余高度，内容不足时居中显示空状态 */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 无消息时的欢迎提示 */
+.empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 对话错误提示条（请求失败 / SSE error 事件） */
+.error-banner {
+  align-self: center;
+  max-width: 90%;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--error);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+}

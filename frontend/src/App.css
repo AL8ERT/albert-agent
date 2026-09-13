@@ -1,0 +1,10 @@
+/* 应用整体布局：固定最大宽度，头部/消息区/输入框纵向排列 */
+.app {
+  height: 100%;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}

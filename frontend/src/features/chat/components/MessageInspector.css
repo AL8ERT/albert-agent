@@ -1,0 +1,148 @@
+/* 「查看消息」弹层：遮罩 + 居中面板 */
+.inspector-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 100;
+}
+
+/* 面板本体：限宽限高，内容区独立滚动 */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 82vh;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.inspector-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inspector-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* 当前会话的 thread_id，长内容允许换行 */
+.inspector-thread {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.inspector-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 刷新 / 关闭按钮 */
+.inspector-button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.inspector-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.inspector-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.inspector-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 加载中 / 错误 / 系统提示词说明文字 */
+.inspector-hint,
+.inspector-error,
+.inspector-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.inspector-note {
+  font-size: 12px;
+}
+
+.inspector-error {
+  color: var(--error);
+}
+
+/* 单条消息卡片 */
+.inspector-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+/* 消息类型徽标 */
+.inspector-role {
+  align-self: flex-start;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--assistant-bg);
+  color: var(--text);
+}
+
+.inspector-role.role-human {
+  background: var(--user-bg);
+  color: var(--user-text);
+}
+
+.inspector-role.role-system {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+/* 消息正文与工具调用 JSON：保留换行，长内容可断行 */
+.inspector-content,
+.inspector-tools {
+  margin: 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inspector-tools {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}

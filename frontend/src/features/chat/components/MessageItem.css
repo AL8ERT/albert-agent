@@ -1,0 +1,53 @@
+/* 消息基础样式：限制宽度、统一字号 */
+.message {
+  max-width: 78%;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* 用户消息：右侧、主题色背景气泡 */
+.message.user {
+  align-self: flex-end;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border-bottom-right-radius: 4px;
+  background: var(--user-bg);
+  color: var(--user-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 助手消息：左侧，内部按顺序排列多段文本与工具卡片 */
+.message.assistant {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 88%;
+}
+
+/* 助手文本段落：浅色气泡，自动换行、保留空白字符 */
+.assistant-text {
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border-bottom-left-radius: 4px;
+  background: var(--assistant-bg);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 流式输出中的闪烁光标 */
+.assistant-text.streaming::after {
+  content: '▍';
+  margin-left: 2px;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}

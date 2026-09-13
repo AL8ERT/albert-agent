@@ -1,0 +1,58 @@
+:root {
+  /* 主题色板：浅色模式默认值，深色模式在下方媒体查询中覆盖 */
+  --bg: #f5f5f7;
+  --panel: #ffffff;
+  --border: #e2e2e6;
+  --text: #1c1c1e;
+  --muted: #8e8e93;
+  --accent: #4f46e5;
+  --user-bg: #4f46e5;
+  --user-text: #ffffff;
+  --assistant-bg: #e9e9ee;
+  --error: #b91c1c;
+  --error-bg: #fee2e2;
+  --error-border: #fecaca;
+
+  font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 跟随系统深色模式调整色板 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --panel: #202024;
+    --border: #323237;
+    --text: #ececf1;
+    --muted: #9a9aa1;
+    --accent: #6d6df0;
+    --user-bg: #4f46e5;
+    --user-text: #ffffff;
+    --assistant-bg: #2b2b33;
+    --error: #fca5a5;
+    --error-bg: #3b1d1d;
+    --error-border: #7f1d1d;
+  }
+}
+
+/* 统一盒模型，避免 padding/border 撑大尺寸 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+}
