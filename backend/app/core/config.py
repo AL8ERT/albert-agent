@@ -1,7 +1,11 @@
 """应用配置：读取用户 JSON 配置与环境变量，并提供模型列表。
 
-配置优先级（从高到低）：应用配置（用户目录 .albert-agent/albert-agent-config.json）> 环境变量 > 代码默认值。
-数据库连接串额外支持工作目录下的 .env（只读其中的 DATABASE_URL，其他配置一律不读 .env）。
+用户配置固定为四个顶层键（用户目录 .albert-agent/albert-agent-config.json），
+完整结构由 UserConfig 模型定义（read_user_config 返回该模型，字段即文档）：
+providers（模型列表）、mcpServers、subagents、webFetchAllowedDomains。
+字段类型不匹配或出现空值时读取直接抛 RuntimeError（附校验详情），不静默跳过；
+未知顶层键忽略；重复项（模型名 / 子 agent 名 / 域名）去重保留先出现的。
+Settings 从环境变量与工作目录下的 .env 读取（优先级：环境变量 > .env > 默认值）。
 模型列表与数据库连接串都从这里读取，供 agent、API 路由和持久化层共用。
 """
 
@@ -10,51 +14,26 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 应用配置的目录名与文件名，固定放在用户主目录下
 USER_CONFIG_DIRNAME = ".albert-agent"
 USER_CONFIG_FILENAME = "albert-agent-config.json"
 
-# MCP server 配置在用户 JSON 里的键名，兼容 camelCase 与下划线/中划线写法。
-_MCP_SERVER_KEYS = ("mcpServers", "mcp_servers", "mcp-servers", "mcpservers")
-
-# 子 agent 配置在用户 JSON 里的键名，兼容 camelCase 与下划线/中划线写法。
-_SUBAGENT_KEYS = ("subagents", "sub_agents", "sub-agents")
-
 # 系统内置的通用任务子 agent；用户配置同名子 agent 时以用户配置为准。
 DEFAULT_SUBAGENT_NAME = "general"
 DEFAULT_SUBAGENT_PROMPT = (
     "You are a general-purpose subagent. Complete the delegated task "
-    "independently using the available skills and tools, then return only "
-    "the final answer."
+    "independently using the available skills and tools, then return only the "
+    "final answer."
 )
-
-# web_fetch 可访问域名白名单在用户 JSON 里的键名（字符串数组）。
-_WEB_FETCH_DOMAIN_KEYS = (
-    "webFetchAllowedDomains",
-    "web_fetch_allowed_domains",
-    "web-fetch-allowed-domains",
-)
-
-# 用户配置文件里的键名别名 -> Settings 字段名。
-# 兼容多种历史写法（url / model-name / api-key / db_url 等），统一归一化后再交给 pydantic。
-_USER_CONFIG_KEYS = {
-    "url": "deepseek_base_url",
-    "base_url": "deepseek_base_url",
-    "base-url": "deepseek_base_url",
-    "model_name": "deepseek_model",
-    "model-name": "deepseek_model",
-    "model": "deepseek_model",
-    "api_key": "deepseek_api_key",
-    "api-key": "deepseek_api_key",
-    "apikey": "deepseek_api_key",
-    "database_url": "database_url",
-    "database-url": "database_url",
-    "db_url": "database_url",
-    "pg_url": "database_url",
-}
 
 
 class ModelConfig(BaseModel):
@@ -65,11 +44,100 @@ class ModelConfig(BaseModel):
     api_key: str
 
 
+class ProviderConfig(BaseModel):
+    """单个模型 provider：url / api_key 与它提供的模型名列表。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    url: str = ""
+    api_key: str = ""
+    models: list[str] = Field(default_factory=list)
+
+    @field_validator("models")
+    @classmethod
+    def _model_names_normalized(cls, value: list[str]) -> list[str]:
+        """模型名去首尾空白；空白项视为无效配置。"""
+        names = [name.strip() for name in value]
+        if any(not name for name in names):
+            raise ValueError("model names must be non-empty strings")
+        return names
+
+
 class SubagentConfig(BaseModel):
     """单个子 agent 的定义：名称 + 提示词（作为其系统提示词）。"""
 
     name: str
     prompt: str
+
+    @field_validator("name", "prompt")
+    @classmethod
+    def _strip_nonempty(cls, value: str) -> str:
+        """名称与提示词去首尾空白；空白视为无效配置。"""
+        value = value.strip()
+        if not value:
+            raise ValueError("must be a non-empty string")
+        return value
+
+
+class UserConfig(BaseModel):
+    """用户 JSON 配置的顶层结构（唯一事实来源，字段即文档）。
+
+    字段名用 snake_case（PEP 8），JSON 键保持小驼峰（跟随 MCP 生态约定），
+    通过 alias 对应；输入只认别名键。mcp_servers 的值为透传给 MCP 客户端的
+    开放结构（stdio 用 command/args/env，远程用 url/headers，可带 type:
+    http | sse），因此保留 dict[str, dict]。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    providers: list[ProviderConfig] = Field(default_factory=list)
+    mcp_servers: dict[str, dict[str, Any]] = Field(
+        default_factory=dict, alias="mcpServers"
+    )
+    subagents: list[SubagentConfig] = Field(default_factory=list)
+    web_fetch_allowed_domains: list[str] = Field(
+        default_factory=list, alias="webFetchAllowedDomains"
+    )
+
+    @field_validator("web_fetch_allowed_domains")
+    @classmethod
+    def _domains_normalized(cls, value: list[str]) -> list[str]:
+        """域名归一化：去空白、转小写、去前导点，去重保持顺序；空白项无效。"""
+        domains: list[str] = []
+        for item in value:
+            domain = item.strip().lower().lstrip(".")
+            if not domain:
+                raise ValueError("domains must be non-empty strings")
+            if domain not in domains:
+                domains.append(domain)
+        return domains
+
+    def models(self) -> list[ModelConfig]:
+        """把 providers 展开为模型列表；模型名全局去重，保留先出现的配置。"""
+        models: list[ModelConfig] = []
+        seen: set[str] = set()
+        for provider in self.providers:
+            for name in provider.models:
+                if name in seen:
+                    continue
+                seen.add(name)
+                models.append(
+                    ModelConfig(
+                        name=name, base_url=provider.url, api_key=provider.api_key
+                    )
+                )
+        return models
+
+    def subagents_deduped(self) -> list[SubagentConfig]:
+        """同名子 agent 去重，保留先出现的。"""
+        deduped: list[SubagentConfig] = []
+        seen: set[str] = set()
+        for subagent in self.subagents:
+            if subagent.name in seen:
+                continue
+            seen.add(subagent.name)
+            deduped.append(subagent)
+        return deduped
 
 
 def user_config_path() -> Path:
@@ -77,158 +145,57 @@ def user_config_path() -> Path:
     return Path.home() / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME
 
 
-def read_user_config() -> dict[str, Any]:
-    """读取用户 JSON 配置文件；文件不存在时返回空字典。
+def read_user_config() -> UserConfig:
+    """读取并校验用户 JSON 配置；文件不存在时返回空配置。
 
-    文件存在但无法解析、或顶层不是 JSON 对象时抛 RuntimeError，
-    避免静默使用错误配置。
+    文件无法解析、顶层不是 JSON 对象、或字段不符合 UserConfig 结构时抛
+    RuntimeError（附 Pydantic 校验详情），避免静默使用错误配置。
     """
     path = user_config_path()
     if not path.is_file():
-        return {}
+        return UserConfig()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Failed to read user config {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise RuntimeError(f"User config {path} must be a JSON object")
-    return raw
+    try:
+        return UserConfig.model_validate(raw)
+    except ValidationError as exc:
+        raise RuntimeError(f"Invalid user config {path}: {exc}") from exc
 
 
-def load_user_config() -> dict[str, Any]:
-    """把用户配置里的键名映射为 Settings 字段名，并过滤空值。
-
-    只有出现在 _USER_CONFIG_KEYS 里的键会被采纳，其余键（如 models 列表）由
-    _models_from_raw 单独处理。
-    """
-    raw = read_user_config()
-    values: dict[str, Any] = {}
-    for key, value in raw.items():
-        field = _USER_CONFIG_KEYS.get(key.strip().lower())
-        if field is not None and value not in (None, ""):
-            values[field] = value
-    return values
-
-
-def _as_text(value: Any) -> str:
-    """把配置值统一转成字符串，None / 空串返回空字符串。"""
-    return str(value) if value not in (None, "") else ""
-
-
-def _models_from_providers(providers: list[Any]) -> list[ModelConfig]:
-    """解析 providers 结构：每个 provider 提供自己的 url / api_key 与模型列表。
-
-    models 必须是字符串列表，非字符串项忽略；模型名全局去重，保留先出现的配置。
-    """
-    models: list[ModelConfig] = []
-    seen: set[str] = set()
-    for provider in providers:
-        if not isinstance(provider, dict):
-            continue
-        provider_url = _as_text(provider.get("url") or provider.get("base_url"))
-        provider_key = _as_text(provider.get("api_key") or provider.get("api-key"))
-        entries = provider.get("models")
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, str):
-                continue
-            name = entry.strip()
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            models.append(
-                ModelConfig(name=name, base_url=provider_url, api_key=provider_key)
-            )
-    return models
-
-
-def _models_from_raw(raw: dict[str, Any]) -> list[ModelConfig]:
-    """从应用配置的原始 JSON 中解析模型列表（仅支持 providers 结构）。"""
-    providers = raw.get("providers")
-    if not isinstance(providers, list):
-        return []
-    return _models_from_providers(providers)
+@lru_cache
+def get_user_config() -> UserConfig:
+    """返回缓存的用户配置（首次访问时加载，修改配置后需重启后端）。"""
+    return read_user_config()
 
 
 class Settings(BaseSettings):
-    """环境变量中的全局配置项。"""
+    """环境变量 / .env 中的全局配置项（优先级：环境变量 > .env > 默认值）。"""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", env_file=".env")
 
     app_name: str = "Albert Agent API"
     cors_origins: list[str] = ["*"]
 
-    # 未配置用户 JSON 时的模型回退配置
-    deepseek_api_key: str = ""
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-flash"
-
-    # PostgreSQL 连接串；为空时 checkpointer 回退到内存实现
+    # PostgreSQL 连接串；为空时 checkpointer 回退为内存实现
     database_url: str = ""
 
     agent_system_prompt: str = "You are Albert, a helpful and concise assistant."
     llm_temperature: float = 0.7
 
 
-# .env 中唯一被读取的键
-_DOTENV_DATABASE_KEY = "DATABASE_URL"
-
-
-def _read_dotenv_database_url() -> str:
-    """从工作目录的 .env 中读取 DATABASE_URL，其他键一律忽略。
-
-    简单的 KEY=VALUE 解析：支持引号包裹的值、忽略空行与 # 注释；
-    文件不存在或读取失败时返回空字符串。
-    """
-    path = Path(".env")
-    if not path.is_file():
-        return ""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return ""
-    prefix = f"{_DOTENV_DATABASE_KEY}="
-    for line in lines:
-        stripped = line.strip()
-        if not stripped.startswith(prefix):
-            continue
-        value = stripped[len(prefix) :].strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        return value
-    return ""
-
-
 @lru_cache
 def get_settings() -> Settings:
-    """构建并缓存全局配置（用户 JSON > 环境变量 > .env 中的 DATABASE_URL）。"""
-    settings = Settings(**load_user_config())
-    if not settings.database_url:
-        settings.database_url = _read_dotenv_database_url()
-    return settings
+    """构建并缓存全局配置（环境变量 > .env > 默认值）。"""
+    return Settings()
 
 
-@lru_cache
 def get_models() -> list[ModelConfig]:
-    """返回可用模型列表，并缓存结果。
-
-    优先使用用户 JSON 中的模型定义；若没有，则回退到环境变量中的
-    单个 DeepSeek 配置；两者都没有时返回空列表（API 层会返回 503）。
-    """
-    models = _models_from_raw(read_user_config())
-    if models:
-        return models
-    settings = get_settings()
-    if settings.deepseek_api_key:
-        return [
-            ModelConfig(
-                name=settings.deepseek_model,
-                base_url=settings.deepseek_base_url,
-                api_key=settings.deepseek_api_key,
-            )
-        ]
-    return []
+    """返回可用模型列表（providers 展开去重），未配置时为空列表（API 层返回 503）。"""
+    return get_user_config().models()
 
 
 def find_model(name: str) -> ModelConfig | None:
@@ -239,68 +206,17 @@ def find_model(name: str) -> ModelConfig | None:
     return None
 
 
-def read_mcp_servers(raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """从用户配置 JSON 中读取 MCP server 定义（未配置时返回空字典）。
-
-    server 配置采用通用写法：stdio 用 command/args/env，远程用
-    url/headers（可带 type: http | sse）。键名支持 mcpServers /
-    mcp_servers / mcp-servers / mcpservers。
-    """
-    source = read_user_config() if raw is None else raw
-    for key in _MCP_SERVER_KEYS:
-        value = source.get(key)
-        if isinstance(value, dict):
-            return {
-                str(name): dict(server)
-                for name, server in value.items()
-                if isinstance(server, dict)
-            }
-    return {}
-
-
-@lru_cache
 def get_mcp_servers() -> dict[str, dict[str, Any]]:
-    """返回缓存的 MCP server 配置（启动时加载，修改配置需重启）。"""
-    return read_mcp_servers()
+    """返回 MCP server 配置（键为名称，值为透传给 MCP 客户端的原始结构）。"""
+    return dict(get_user_config().mcp_servers)
 
 
-def read_subagents(raw: dict[str, Any] | None = None) -> list[SubagentConfig]:
-    """从用户配置 JSON 中读取子 agent 定义（对象数组，每项 name + prompt）。
-
-    只接受 name / prompt 都是非空字符串的项；同名子 agent 去重，保留先出现者。
-    键名支持 subagents / sub_agents / sub-agents。
-    """
-    source = read_user_config() if raw is None else raw
-    for key in _SUBAGENT_KEYS:
-        value = source.get(key)
-        if not isinstance(value, list):
-            continue
-        subagents: list[SubagentConfig] = []
-        seen: set[str] = set()
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            name = item.get("name")
-            prompt = item.get("prompt")
-            if not isinstance(name, str) or not isinstance(prompt, str):
-                continue
-            name = name.strip()
-            prompt = prompt.strip()
-            if not name or not prompt or name in seen:
-                continue
-            seen.add(name)
-            subagents.append(SubagentConfig(name=name, prompt=prompt))
-        return subagents
-    return []
-
-
-@lru_cache
 def get_subagents() -> tuple[SubagentConfig, ...]:
-    """返回缓存的子 agent 列表：用户配置 + 内置默认（同名时用户配置优先）。
+    """返回子 agent 列表：用户配置 + 内置默认（同名时用户配置优先）。
 
-    内置的通用任务子 agent 始终可用；修改配置需重启后端。
+    内置的通用任务子 agent 始终可用；名单在进程内缓存，修改配置需重启后端。
     """
-    configured = read_subagents()
+    configured = get_user_config().subagents_deduped()
     if any(subagent.name == DEFAULT_SUBAGENT_NAME for subagent in configured):
         return tuple(configured)
     return (
@@ -309,28 +225,6 @@ def get_subagents() -> tuple[SubagentConfig, ...]:
     )
 
 
-def read_web_fetch_allowed_domains(raw: dict[str, Any] | None = None) -> list[str]:
-    """读取 web_fetch 域名白名单（字符串数组），归一化为小写并去掉前导点。
-
-    只接受字符串项，重复项去重并保持顺序；未配置时返回空列表（= 全部拒绝）。
-    """
-    source = read_user_config() if raw is None else raw
-    for key in _WEB_FETCH_DOMAIN_KEYS:
-        value = source.get(key)
-        if not isinstance(value, list):
-            continue
-        domains: list[str] = []
-        for item in value:
-            if not isinstance(item, str):
-                continue
-            domain = item.strip().lower().lstrip(".")
-            if domain and domain not in domains:
-                domains.append(domain)
-        return domains
-    return []
-
-
-@lru_cache
 def get_web_fetch_allowed_domains() -> tuple[str, ...]:
-    """返回缓存的 web_fetch 域名白名单（为空表示禁止访问任何地址）。"""
-    return tuple(read_web_fetch_allowed_domains())
+    """返回 web_fetch 域名白名单（已归一化；为空表示禁止访问任何地址）。"""
+    return tuple(get_user_config().web_fetch_allowed_domains)

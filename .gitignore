@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# opencode
+.opencode/
+
+# Agent instructions (local only)
+AGENTS.md
+
 # Editor directories and files
 .idea/
 .vscode/*

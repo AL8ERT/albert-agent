@@ -14,18 +14,12 @@ from app.core import config
 
 @pytest.fixture(autouse=True)
 def _clear_caches() -> Iterator[None]:
-    """进入/退出每个用例时清空 Settings / models / mcp / subagents / web_fetch 缓存。"""
+    """进入/退出每个用例时清空 Settings 与用户配置缓存。"""
     config.get_settings.cache_clear()
-    config.get_models.cache_clear()
-    config.get_mcp_servers.cache_clear()
-    config.get_subagents.cache_clear()
-    config.get_web_fetch_allowed_domains.cache_clear()
+    config.get_user_config.cache_clear()
     yield
     config.get_settings.cache_clear()
-    config.get_models.cache_clear()
-    config.get_mcp_servers.cache_clear()
-    config.get_subagents.cache_clear()
-    config.get_web_fetch_allowed_domains.cache_clear()
+    config.get_user_config.cache_clear()
 
 
 def test_user_config_path_points_to_app_dir(
@@ -39,53 +33,42 @@ def test_user_config_path_points_to_app_dir(
     )
 
 
-def test_load_user_config_maps_aliases(
+def test_read_user_config_missing_file_returns_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """用户配置里的多种键名别名应归一化为 Settings 字段名。"""
-    config_file = tmp_path / "albert-agent-config.json"
-    config_file.write_text(
-        json.dumps(
-            {
-                "url": "https://example.com/v1",
-                "model-name": "my-model",
-                "api-key": "sk-test",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config, "user_config_path", lambda: config_file)
-
-    assert config.load_user_config() == {
-        "deepseek_base_url": "https://example.com/v1",
-        "deepseek_model": "my-model",
-        "deepseek_api_key": "sk-test",
-    }
-
-
-def test_load_user_config_missing_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """配置文件不存在时返回空字典（不抛错）。"""
+    """配置文件不存在时返回空的 UserConfig（各字段为默认值）。"""
     monkeypatch.setattr(config, "user_config_path", lambda: tmp_path / "missing.json")
 
-    assert config.load_user_config() == {}
+    assert config.read_user_config() == config.UserConfig()
 
 
-def test_load_user_config_maps_database_url(
+def test_read_user_config_parses_all_sections_and_ignores_unknown_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """db_url 别名应映射到 database_url。"""
+    """四个顶层键全部解析为 UserConfig 字段，未知顶层键忽略。"""
+    payload = {
+        "unknown": {"ignored": True},
+        "providers": [
+            {"url": "https://a.example/v1", "api_key": "sk-a", "models": ["m-1"]}
+        ],
+        "mcpServers": {"playwright": {"command": "npx"}},
+        "subagents": [{"name": "researcher", "prompt": "Find facts"}],
+        "webFetchAllowedDomains": ["Example.COM"],
+    }
     config_file = tmp_path / "albert-agent-config.json"
-    config_file.write_text(
-        json.dumps({"db_url": "postgresql://u:p@localhost:5432/db"}),
-        encoding="utf-8",
-    )
+    config_file.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
 
-    assert config.load_user_config() == {
-        "database_url": "postgresql://u:p@localhost:5432/db"
-    }
+    user_config = config.read_user_config()
+
+    assert isinstance(user_config, config.UserConfig)
+    assert user_config.providers[0].url == "https://a.example/v1"
+    assert user_config.providers[0].models == ["m-1"]
+    assert user_config.mcp_servers == {"playwright": {"command": "npx"}}
+    assert [(s.name, s.prompt) for s in user_config.subagents] == [
+        ("researcher", "Find facts")
+    ]
+    assert user_config.web_fetch_allowed_domains == ["example.com"]
 
 
 def test_get_models_ignores_legacy_flat_structure(
@@ -98,78 +81,38 @@ def test_get_models_ignores_legacy_flat_structure(
         encoding="utf-8",
     )
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     assert config.get_models() == []
 
 
-def test_get_models_env_fallback(
+def test_dotenv_provides_all_settings_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """没有用户配置时，回退到环境变量中的 DeepSeek 配置。"""
-    monkeypatch.setattr(config, "user_config_path", lambda: tmp_path / "missing.json")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
-    monkeypatch.setenv("DEEPSEEK_MODEL", "env-model")
-
-    models = config.get_models()
-
-    assert [model.name for model in models] == ["env-model"]
-    assert models[0].api_key == "sk-env"
-
-
-def test_get_settings_uses_user_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """用户 JSON 配置应覆盖 Settings 默认值。"""
-    config_file = tmp_path / "albert-agent-config.json"
-    config_file.write_text(
-        json.dumps(
-            {
-                "url": "https://example.com/v1",
-                "model_name": "my-model",
-                "api_key": "sk-test",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config, "user_config_path", lambda: config_file)
-
-    settings = config.get_settings()
-
-    assert settings.deepseek_base_url == "https://example.com/v1"
-    assert settings.deepseek_model == "my-model"
-    assert settings.deepseek_api_key == "sk-test"
-
-
-def test_dotenv_only_provides_database_url(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """.env 只读取 DATABASE_URL，其他键（如 DEEPSEEK_API_KEY）一律忽略。"""
+    """.env 可提供全部 Settings 字段（pydantic-settings 读取）。"""
     (tmp_path / ".env").write_text(
-        "DEEPSEEK_API_KEY=sk-dotenv\n"
+        "APP_NAME=Dotenv App\n"
+        "LLM_TEMPERATURE=0.1\n"
         "DATABASE_URL=postgresql://u:p@localhost:5432/db\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "user_config_path", lambda: tmp_path / "missing.json")
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     settings = config.get_settings()
 
-    assert settings.deepseek_api_key == ""
+    assert settings.app_name == "Dotenv App"
+    assert settings.llm_temperature == 0.1
     assert settings.database_url == "postgresql://u:p@localhost:5432/db"
 
 
 def test_database_url_env_overrides_dotenv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DATABASE_URL 优先级：用户 JSON > 环境变量 > .env。"""
+    """DATABASE_URL 优先级：环境变量 > .env。"""
     (tmp_path / ".env").write_text(
         "DATABASE_URL=postgresql://dotenv/db\n", encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "user_config_path", lambda: tmp_path / "missing.json")
     monkeypatch.setenv("DATABASE_URL", "postgresql://env/db")
 
     assert config.get_settings().database_url == "postgresql://env/db"
@@ -247,10 +190,10 @@ def test_get_models_from_providers_dedupes(
     ]
 
 
-def test_get_models_providers_ignore_malformed_entries(
+def test_get_models_providers_malformed_entry_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """非对象 provider、缺 models、models 非列表、非字符串项、空模型名都跳过。"""
+    """providers 里的坏条目（非对象项、models 非列表、非字符串/空白模型名）直接报错。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
         json.dumps(
@@ -259,10 +202,7 @@ def test_get_models_providers_ignore_malformed_entries(
                     "not-a-provider",
                     {"url": "https://a.example/v1"},
                     {"url": "https://b.example/v1", "models": "solo-model"},
-                    {
-                        "url": "https://c.example/v1",
-                        "models": [123, "", "ok", {"name": "object-entry"}],
-                    },
+                    {"url": "https://c.example/v1", "models": [123, ""]},
                 ]
             }
         ),
@@ -270,13 +210,14 @@ def test_get_models_providers_ignore_malformed_entries(
     )
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
 
-    assert [model.name for model in config.get_models()] == ["ok"]
+    with pytest.raises(RuntimeError, match="Invalid user config"):
+        config.get_models()
 
 
 def test_get_mcp_servers_reads_camel_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """mcpServers 键（标准 MCP 客户端写法）应被解析，非对象的项被忽略。"""
+    """mcpServers 键（标准 MCP 客户端写法）应被解析。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
         json.dumps(
@@ -288,7 +229,6 @@ def test_get_mcp_servers_reads_camel_case(
                         "enabled": True,
                     },
                     "remote": {"url": "https://mcp.example.com/mcp", "type": "http"},
-                    "broken": "not-an-object",
                 }
             }
         ),
@@ -303,18 +243,19 @@ def test_get_mcp_servers_reads_camel_case(
     assert servers["remote"]["url"] == "https://mcp.example.com/mcp"
 
 
-def test_get_mcp_servers_accepts_snake_and_kebab_aliases(
+def test_get_mcp_servers_malformed_entry_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """mcp_servers / mcp-servers 等别名同样可用。"""
+    """mcpServers 的值不是对象时直接报错。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
-        json.dumps({"mcp_servers": {"a": {"command": "echo"}}}),
+        json.dumps({"mcpServers": {"broken": "not-an-object"}}),
         encoding="utf-8",
     )
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
 
-    assert config.get_mcp_servers() == {"a": {"command": "echo"}}
+    with pytest.raises(RuntimeError, match="Invalid user config"):
+        config.get_mcp_servers()
 
 
 def test_get_mcp_servers_missing(
@@ -386,38 +327,15 @@ def test_get_subagents_custom_general_overrides_builtin(
     ]
 
 
-def test_get_subagents_accepts_snake_and_kebab_aliases(
+def test_get_subagents_strips_and_dedupes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sub_agents / sub-agents 等别名同样可用。"""
-
-    def _write(raw: dict) -> None:
-        config_file = tmp_path / "albert-agent-config.json"
-        config_file.write_text(json.dumps(raw), encoding="utf-8")
-        monkeypatch.setattr(config, "user_config_path", lambda: config_file)
-        config.get_subagents.cache_clear()
-
-    _write({"sub_agents": [{"name": "snake", "prompt": "s"}]})
-    assert config.get_subagents()[0].name == "snake"
-
-    _write({"sub-agents": [{"name": "kebab", "prompt": "k"}]})
-    assert config.get_subagents()[0].name == "kebab"
-
-
-def test_read_subagents_ignores_malformed_entries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """非列表、非对象、缺字段、空名称/提示词、同名项都跳过。"""
+    """name/prompt 去首尾空白；同名子 agent 只保留先出现的。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
         json.dumps(
             {
                 "subagents": [
-                    "not-an-object",
-                    {"name": ""},
-                    {"name": "no-prompt"},
-                    {"name": "empty-prompt", "prompt": "   "},
-                    {"name": 123, "prompt": "bad-name"},
                     {"name": "ok", "prompt": "  do it  "},
                     {"name": "ok", "prompt": "duplicate"},
                 ]
@@ -427,15 +345,41 @@ def test_read_subagents_ignores_malformed_entries(
     )
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
 
-    assert config.read_subagents() == [
-        config.SubagentConfig(name="ok", prompt="do it")
+    subagents = config.get_subagents()
+
+    assert [(subagent.name, subagent.prompt) for subagent in subagents] == [
+        ("ok", "do it"),
+        ("general", config.DEFAULT_SUBAGENT_PROMPT),
     ]
 
 
-def test_read_subagents_non_list_returns_empty(
+def test_get_subagents_malformed_entry_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """subagents 不是数组时按未配置处理（仍会回退到内置默认）。"""
+    """subagents 里的坏条目（缺字段、空名称、非字符串）直接报错。"""
+    config_file = tmp_path / "albert-agent-config.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "subagents": [
+                    {"name": "no-prompt"},
+                    {"name": "", "prompt": "x"},
+                    {"name": 123, "prompt": "bad-name"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "user_config_path", lambda: config_file)
+
+    with pytest.raises(RuntimeError, match="Invalid user config"):
+        config.get_subagents()
+
+
+def test_get_subagents_non_list_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """subagents 不是数组时直接报错。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
         json.dumps({"subagents": {"name": "x", "prompt": "y"}}),
@@ -443,14 +387,14 @@ def test_read_subagents_non_list_returns_empty(
     )
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
 
-    assert config.read_subagents() == []
-    assert [subagent.name for subagent in config.get_subagents()] == ["general"]
+    with pytest.raises(RuntimeError, match="Invalid user config"):
+        config.get_subagents()
 
 
 def test_get_web_fetch_allowed_domains_normalizes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """白名单应转小写、去前导点、去重，非字符串项忽略。"""
+    """白名单应转小写、去前导点、去重并保持顺序。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
         json.dumps(
@@ -459,8 +403,6 @@ def test_get_web_fetch_allowed_domains_normalizes(
                     "Example.com",
                     ".docs.python.org",
                     "example.com",
-                    "",
-                    123,
                     "  github.com  ",
                 ]
             }
@@ -476,18 +418,22 @@ def test_get_web_fetch_allowed_domains_normalizes(
     )
 
 
-def test_get_web_fetch_allowed_domains_snake_alias(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("domains", [[123], [""]])
+def test_get_web_fetch_allowed_domains_malformed_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    domains: list,
 ) -> None:
-    """兼容 web_fetch_allowed_domains 写法。"""
+    """白名单出现非字符串项或空白项时直接报错。"""
     config_file = tmp_path / "albert-agent-config.json"
     config_file.write_text(
-        json.dumps({"web_fetch_allowed_domains": ["a.com"]}),
+        json.dumps({"webFetchAllowedDomains": domains}),
         encoding="utf-8",
     )
     monkeypatch.setattr(config, "user_config_path", lambda: config_file)
 
-    assert config.get_web_fetch_allowed_domains() == ("a.com",)
+    with pytest.raises(RuntimeError, match="Invalid user config"):
+        config.get_web_fetch_allowed_domains()
 
 
 def test_get_web_fetch_allowed_domains_missing(

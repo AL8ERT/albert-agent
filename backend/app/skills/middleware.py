@@ -62,6 +62,11 @@ class SkillMiddleware(AgentMiddleware):
         )
 
     def before_model(self, state, runtime):
+        """模型调用前的注入钩子。
+
+        返回 dict 时其中的 messages（隐藏消息）会被追加到对话尾部并更新
+        已公告名单；返回 None 表示无变化、不注入任何内容。
+        """
         current = self._snapshot()
         current_names = {skill.name for skill in current}
         announced = state.get("announced_skills")
@@ -93,4 +98,5 @@ class SkillMiddleware(AgentMiddleware):
         }
 
     async def abefore_model(self, state, runtime):
+        """异步入口：直接复用同步实现（快照读取本身是同步 IO）。"""
         return self.before_model(state, runtime)

@@ -91,6 +91,7 @@ def _escape(value: str) -> str:
 
 
 def _format_skill_line(skill: SkillMetadata) -> str:
+    """渲染单条技能行：`- 名称: 描述 (path: 路径)`，字段均经 XML 转义。"""
     suffix = f": {_escape(skill.description)}" if skill.description else ""
     return f"- {_escape(skill.name)}{suffix} (path: {_escape(skill.path)})"
 

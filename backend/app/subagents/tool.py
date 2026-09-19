@@ -58,6 +58,7 @@ def create_subagent_tool(model: BaseChatModel, tools: list[BaseTool]) -> BaseToo
     graphs: dict[str, Any] = {}
 
     def _graph_for(subagent: SubagentConfig) -> Any:
+        """按名称取缓存的子 agent 图，首次调用时才构建（懒加载）。"""
         graph = graphs.get(subagent.name)
         if graph is None:
             graph = build_subagent_graph(model, tools, subagent)

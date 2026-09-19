@@ -38,12 +38,13 @@
 }
 ```
 
-- provider 的键名：`url`（兼容 `base_url`）、`api_key`（兼容 `api-key`）、`models`（字符串列表）
+- provider 的键名：`url`、`api_key`、`models`（字符串列表）
 - 模型列表只从 `providers` 解析：每个 provider 必须提供自己的 `url` / `api_key`，模型名全局去重，重复时保留先出现的 provider
-- 文件不存在或未配置模型时，回退到环境变量中的 DeepSeek 配置
-- 配置优先级：应用配置 > 环境变量 > 默认值（`.env` 只提供 `DATABASE_URL`，见下文，其他配置一律不读）
+- 未配置 `providers` 时 `/api/models` 返回空列表，对话接口返回 503
+- 配置结构由 `app/core/config.py` 的 `UserConfig` 模型定义（字段即文档）：字段类型错误或空值会让读取直接抛 `RuntimeError` 并附校验详情（不做静默跳过），未知顶层键忽略，重复项（模型名 / 子 agent 名 / 域名）去重保留先出现的
+- 用户 JSON 只提供 `providers` / `mcpServers` / `subagents` / `webFetchAllowedDomains` 四个顶层键；Settings（如 `AGENT_SYSTEM_PROMPT`、`LLM_TEMPERATURE`、`DATABASE_URL`）从环境变量或 `.env` 读取（见下文）
 
-其他配置项定义在 `app/core/config.py`（如 `AGENT_SYSTEM_PROMPT`、`LLM_TEMPERATURE`），通过环境变量设置（不属于应用配置）。
+其他配置项定义在 `app/core/config.py`（如 `AGENT_SYSTEM_PROMPT`、`LLM_TEMPERATURE`），通过环境变量或工作目录下的 `.env` 设置（不属于应用配置）。
 
 ### 内置工具
 
@@ -89,7 +90,7 @@ agent 默认挂载以下工具：
 
 ### MCP Servers
 
-在同一个应用配置里用 `mcpServers` 配置 MCP server（兼容 `mcp_servers` / `mcp-servers`）。格式遵循 MCP 客户端通用约定：
+在同一个应用配置里用 `mcpServers` 配置 MCP server。格式遵循 MCP 客户端通用约定：
 
 ```json
 {
@@ -141,7 +142,7 @@ description: Process and extract text from PDF files
 
 ### 子 Agent（Subagents）
 
-在同一个应用配置里用 `subagents` 配置子 agent（兼容 `sub_agents` / `sub-agents`），每项两个字段：`name`（调用名）与 `prompt`（子 agent 的系统提示词）。`name` 与 `prompt` 都为非空字符串才生效，同名项只保留第一条：
+在同一个应用配置里用 `subagents` 配置子 agent，每项两个字段：`name`（调用名）与 `prompt`（子 agent 的系统提示词）。`name` 与 `prompt` 都必须是非空字符串（读取时去首尾空白，空值直接报错），同名项只保留第一条：
 
 ```json
 {
@@ -176,7 +177,7 @@ description: Process and extract text from PDF files
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 ```
 
-`DATABASE_URL` 可放在环境变量，或工作目录下的 `.env`（模板见 `.env.example`）。`.env` 是唯一允许放数据库地址的文件，且只读 `DATABASE_URL` 这一个键，其他配置不会从 `.env` 读取；优先级为用户 JSON 里的 `db_url`/`database_url` > 环境变量 > `.env`。
+`DATABASE_URL` 可放在环境变量，或工作目录下的 `.env`（模板见 `.env.example`）。`.env` 由 pydantic-settings 读取，可放置全部 Settings 字段（`APP_NAME`、`CORS_ORIGINS`、`LLM_TEMPERATURE` 等）；优先级：环境变量 > `.env` > 默认值。
 
 启动时会自动创建 LangGraph 的 checkpointer 表，以及记录每次 run 完整 checkpoint 的 `agent_run_checkpoints` 表：
 

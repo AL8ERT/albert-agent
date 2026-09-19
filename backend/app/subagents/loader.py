@@ -26,6 +26,7 @@ def _escape(value: str) -> str:
 
 
 def _format_subagent_line(subagent: SubagentConfig) -> str:
+    """渲染单条子 agent 行：`- 名称: 提示词`，字段均经 XML 转义。"""
     prompt = " ".join(subagent.prompt.split())
     return f"- {_escape(subagent.name)}: {_escape(prompt)}"
 
