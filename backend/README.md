@@ -52,6 +52,7 @@ agent 默认挂载以下工具：
 
 | 工具 | 说明 |
 | --- | --- |
+| `calculate` | 计算数学表达式（AST 白名单安全求值，无 eval 注入风险）：四则运算、`//`、`%`、乘方 `**`、括号，数学函数（`sqrt`/`log`/`sin`/`floor`/`factorial` 等）与常量 `pi`/`e`/`tau`；表达式长度、指数与结果大小均有上限，防 DoS |
 | `get_current_time` | 获取当前日期时间，可选 IANA 时区（如 `Asia/Shanghai`） |
 | `web_search` | DuckDuckGo 网页搜索（`ddgs`，无需 API Key），返回标题/链接/摘要 |
 | `read_file` | 读取文本文件（支持 `~` 展开、offset/limit 分页，拒绝二进制与超大文件），用于加载 SKILL.md 正文 |
@@ -211,13 +212,34 @@ Windows 上不要直接使用 `uvicorn app.main:app`：psycopg 异步连接无�
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/models` | 返回已配置的模型名列表 |
 | POST | `/api/chat/stream` | 发送消息，返回 SSE 流 |
-| GET | `/api/chat/threads/{thread_id}` | 查看该线程在 checkpointer 中的消息列表（可选 `?model=`） |
+| GET | `/api/chat/threads` | 历史会话列表（每个会话一条摘要，按最近活跃倒序） |
+| GET | `/api/chat/threads/{thread_id}` | 查看该线程在 checkpointer 中的消息列表与累计用量（可选 `?model=`） |
 
 `GET /api/models` 响应：
 
 ```json
 { "models": ["deepseek-flash", "deepseek-v4-pro"] }
 ```
+
+`GET /api/chat/threads` 响应（数据来自 `agent_run_checkpoints` 审计表）：
+
+```json
+{
+  "threads": [
+    {
+      "thread_id": "b40fcb02-...",
+      "title": "帮我看下这段代码",
+      "message_count": 8,
+      "model": "deepseek-flash",
+      "updated_at": "2026-09-20T12:00:00+00:00"
+    }
+  ]
+}
+```
+
+- 每个 `thread_id` 只取最新一条 run 聚合成摘要（`title` 为首条非隐藏用户消息截断到 40 字符，`updated_at` 为该 run 的落库时间）；
+- **未配置 PostgreSQL（内存 checkpointer）时没有审计表，列表恒为空数组**——历史会话依赖数据库持久化；
+- 读取失败只记日志并返回空列表（历史属于附加能力，接口不报错）。
 
 `POST /api/chat/stream` 请求体（`model` 可选，缺省使用列表第一个模型；未知模型返回 400，未配置模型返回 503）：
 
@@ -228,6 +250,8 @@ Windows 上不要直接使用 `uvicorn app.main:app`：psycopg 异步连接无�
 响应为 `text/event-stream`，LLM 的中间过程也会推送（前端据此展示文本与工具卡片）：
 
 ```
+data: {"type":"reasoning","content":"用户想要…先分析需求。","message_id":"..."}
+
 data: {"type":"token","content":"我先搜索一下。","message_id":"..."}
 
 data: {"type":"tool_call","tool_call_id":"call-1","name":"web_search","args":{"query":"albert"},"message_id":"..."}
@@ -236,7 +260,7 @@ data: {"type":"tool_result","tool_call_id":"call-1","name":"web_search","content
 
 data: {"type":"token","content":"根据搜索结果…","message_id":"..."}
 
-data: {"type":"done"}
+data: {"type":"done","turn_usage":{"input_tokens":600,"output_tokens":80,"total_tokens":1280,"cached_tokens":600},"total_usage":{"input_tokens":1800,"output_tokens":200,"total_tokens":3200,"cached_tokens":1200}}
 ```
 
 事件类型：
@@ -244,10 +268,32 @@ data: {"type":"done"}
 | 事件 | 说明 |
 | --- | --- |
 | `token` | LLM 增量文本（含工具调用前的中间文本）；`message_id` 标识所属 LLM 消息，前端据此把同一消息的 token 归组到一段 |
+| `reasoning` | 思维链增量（第三方 provider 的 `reasoning_content` 字段）；结构与归组语义同 `token`，仅思考型模型（GLM-4.5+ / DeepSeek-R1 等）会产生。由 `ReasoningChatOpenAI`（`app/agents/chat_model.py`）在流式 chunk 转换时补提取 —— langchain-openai 原生会丢弃该非标字段 |
 | `tool_call` | LLM 请求调用工具：`tool_call_id` / `name` / `args` |
 | `tool_result` | 工具执行结果：`tool_call_id` 关联调用，`content` 为结果文本，`status` 为 `success` / `error`（Guardian 拦截也是 error） |
 | `error` | 执行异常信息（流内错误） |
-| `done` | 流结束 |
+| `done` | 流结束，携带 token 用量统计（见下） |
+
+`done` 事件的用量字段（provider 未上报 usage 时整体缺失）：
+
+- `turn_usage`：本轮合计 —— 主 agent 各次模型调用（`usage_metadata`）之和，并入 `use_subagent` 返回的 ToolMessage 携带的子 agent 用量合计；
+- `total_usage`：整个会话累计 —— 流结束后对 checkpointer 中全部消息求和（AI 消息 `usage_metadata` + ToolMessage 的子 agent 部分），PostgreSQL 持久化下重启后仍准确（内存 checkpointer 重启即失）。
+
+用量结构（`TokenUsage`，提取与汇总见 `app/core/usage.py`）：`input_tokens`（不含缓存命中的输入 token 数）/ `output_tokens` / `total_tokens`（provider 上报总量：输入 + 缓存命中 + 输出）/ `cached_tokens`（命中 prompt 缓存的 token 数，provider 不上报时为 0）。提取时兼容三种来源：`input_token_details.cache_read`（langchain-openai >= 1.x 的键名）、`input_token_details.cached_tokens`（旧版键名）、顶层 `cached_tokens`（部分 provider 的扁平结构），并从 provider 上报的 `input_tokens` 中扣除命中量；`ToolMessage.subagent_usage` 以 `TokenUsage.model_dump()` 持久化、写入时已是该口径，读取时不再二次扣除。
+
+统计口径说明：
+
+- 模型以 `ChatOpenAI(..., stream_usage=True)` 创建：自定义 `base_url` 时 langchain-openai 不会默认附带 `stream_options.include_usage`，必须显式开启，否则流式响应没有 usage；
+- **子 agent 消耗计入统计**：`use_subagent` 通过 `Annotated[ToolRuntime, InjectedToolArg()]` 拿到 `tool_call_id`，把子 agent 全部用量合计写入返回 `ToolMessage` 的 `additional_kwargs["subagent_usage"]`（正文仍只有最终答案），该消息随 checkpointer 持久化并在 turn/total 求和时并入；子 agent 执行中途抛异常时拿不到用量，该次不计入。
+
+### 历史会话
+
+`GET /api/chat/threads` 供前端展示历史对话列表，`GET /api/chat/threads/{thread_id}` 供切换会话时拉取完整消息。要点：
+
+- 数据源是每轮 run 结束时落库的 `agent_run_checkpoints` 审计表，不额外建表：列表按 `thread_id` 聚合取最新一条 run（`DISTINCT ON`），标题从该 run 的消息快照里取首条非隐藏用户消息截断；
+- 详情接口的响应含 `total_usage`（从 checkpointer 全部消息求和，与 SSE `done` 口径一致），前端切换历史会话后能直接恢复用量显示；
+- 消息序列化结构 `ThreadMessage` 含 `tool_call_id` / `tool_calls` / `status`，前端据此把工具调用与结果按 ID 关联、在历史视图里重建完整的工具卡片；
+- 依赖 PostgreSQL：未配置 `DATABASE_URL` 时列表接口返回空数组（内存模式没有审计表），详见 `app/core/database.py` 的 `list_thread_runs`。
 
 ## 测试
 
@@ -261,10 +307,13 @@ uv run pytest
 app/
 ├─ main.py                  # create_app() 入口（lifespan 初始化数据库与 MCP 工具）
 ├─ core/config.py           # pydantic-settings 配置 + 用户 JSON（模型 / MCP / 子 agent / 域名白名单）
+├─ core/database.py         # PostgreSQL checkpointer / 审计表写入 / 历史会话聚合查询
 ├─ core/messages.py         # 消息 content 文本提取（SSE 与子 agent 工具共用）
+├─ core/usage.py            # token 用量提取与汇总（AI 消息 usage_metadata + 子 agent 用量）
 ├─ agents/assistant.py      # create_agent 工厂（内置工具 + MCP 工具 + use_subagent + 中间件）
+├─ agents/chat_model.py     # ReasoningChatOpenAI：保留第三方 provider 的思维链增量
 ├─ agents/prompts.py        # 主 agent / 子 agent 系统提示词（静态框架说明）
-├─ tools/builtins.py        # 内置工具：当前时间 / 网页搜索 / 文件读取
+├─ tools/builtins.py        # 内置工具：数学计算 / 当前时间 / 网页搜索 / 文件读取
 ├─ tools/web_fetch.py       # web_fetch：白名单域名抓取 + HTML 转 Markdown
 ├─ security/guard.py        # read_file 路径与 web_fetch URL 校验规则
 ├─ security/middleware.py   # GuardianMiddleware：工具执行前拦截
@@ -277,7 +326,7 @@ app/
 ├─ api/router.py            # /api 总路由
 ├─ api/routes/              # health / chat 路由
 ├─ schemas/chat.py          # 请求与事件模型
-└─ services/chat_service.py # astream -> SSE
+└─ services/chat_service.py # astream -> SSE、线程消息读取、历史会话列表
 tests/                      # pytest 测试
 ```
 

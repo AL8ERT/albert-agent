@@ -1,0 +1,133 @@
+/* Markdown 正文排版：在 assistant 气泡内生效，作用于 .md-body 容器。
+ * 首尾元素不占额外 margin，避免把气泡撑出多余空白。 */
+
+.md-body > :first-child {
+  margin-top: 0;
+}
+
+.md-body > :last-child {
+  margin-bottom: 0;
+}
+
+.md-body p {
+  margin: 0.5em 0;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.md-body h1 {
+  font-size: 1.35em;
+}
+
+.md-body h2 {
+  font-size: 1.22em;
+}
+
+.md-body h3 {
+  font-size: 1.1em;
+}
+
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  font-size: 1em;
+}
+
+.md-body ul,
+.md-body ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.md-body li {
+  margin: 0.2em 0;
+}
+
+.md-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+}
+
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.9em 0;
+}
+
+.md-body a {
+  color: var(--accent);
+}
+
+/* 表格：边框 + 横向滚动，表头浅底 */
+.md-body table {
+  margin: 0.6em 0;
+  max-width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.md-body th,
+.md-body td {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.md-body th {
+  background: var(--assistant-bg);
+  font-weight: 600;
+}
+
+/* 行内代码：不用等宽气泡色，用半透明 accent 保证深浅色都可读 */
+.md-inline-code {
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  overflow-wrap: anywhere;
+}
+
+/* 块级代码：面板底色 + 横向滚动 */
+.md-code-block {
+  margin: 0.6em 0;
+  max-width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  overflow-x: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.md-code-block code {
+  font-family: inherit;
+  white-space: pre;
+}
+
+/* KaTeX：块级公式超宽时横向滚动，行内公式随文换行 */
+.md-body .katex-display {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.md-body .katex {
+  font-size: 1.05em;
+}

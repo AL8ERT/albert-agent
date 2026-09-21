@@ -1,4 +1,4 @@
-"""内置工具测试：时间格式化、时区容错、搜索结果文本化与文件读取。"""
+"""内置工具测试：时间格式化、时区容错、搜索结果文本化、文件读取与数学计算。"""
 
 from pathlib import Path
 
@@ -16,13 +16,71 @@ def _allow_tmp_reads(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
 
 
 def test_builtin_tools_are_registered() -> None:
-    """内置工具集合应包含时间、搜索、读文件与抓网页。"""
+    """内置工具集合应包含计算、时间、搜索、读文件与抓网页。"""
     assert {tool.name for tool in get_builtin_tools()} == {
+        "calculate",
         "get_current_time",
         "web_search",
         "read_file",
         "web_fetch",
     }
+
+
+def test_calculate_basic_arithmetic() -> None:
+    """四则运算与优先级：先乘除后加减。"""
+    assert builtins.calculate.invoke({"expression": "2 + 3 * 4"}) == "2 + 3 * 4 = 14"
+
+
+def test_calculate_parentheses_and_float() -> None:
+    """括号改变优先级，除法产生浮点结果。"""
+    result = builtins.calculate.invoke({"expression": "(1 + 2) / 4"})
+
+    assert result == "(1 + 2) / 4 = 0.75"
+
+
+def test_calculate_power_and_floor_div() -> None:
+    assert builtins.calculate.invoke({"expression": "2 ** 10"}) == "2 ** 10 = 1024"
+    assert builtins.calculate.invoke({"expression": "-7 // 2"}) == "-7 // 2 = -4"
+
+
+def test_calculate_functions_and_constants() -> None:
+    result = builtins.calculate.invoke({"expression": "floor(pi) + ceil(e)"})
+
+    assert result == "floor(pi) + ceil(e) = 6"
+
+
+def test_calculate_log_with_base() -> None:
+    assert builtins.calculate.invoke({"expression": "log(8, 2)"}).endswith("= 3.0")
+
+
+def test_calculate_rejects_division_by_zero() -> None:
+    assert "计算失败" in builtins.calculate.invoke({"expression": "1 / 0"})
+
+
+def test_calculate_rejects_invalid_syntax() -> None:
+    assert "计算失败" in builtins.calculate.invoke({"expression": "2 +"})
+
+
+def test_calculate_rejects_injection() -> None:
+    """名称访问与函数调用都限定在白名单内，注入式表达式直接拒绝。"""
+    assert (
+        "计算失败"
+        in builtins.calculate.invoke({"expression": "__import__('os').getcwd()"})
+    )
+
+
+def test_calculate_rejects_unknown_names_and_strings() -> None:
+    assert "计算失败" in builtins.calculate.invoke({"expression": "x + 1"})
+    assert "计算失败" in builtins.calculate.invoke({"expression": "'a' + 'b'"})
+
+
+def test_calculate_rejects_huge_exponent() -> None:
+    """链式幂 9**9**9 的外层指数超过上限，应在计算前被拦截。"""
+    assert "计算失败" in builtins.calculate.invoke({"expression": "9 ** 9 ** 9"})
+
+
+def test_calculate_rejects_empty_expression() -> None:
+    assert "计算失败" in builtins.calculate.invoke({"expression": "   "})
 
 
 def test_get_current_time_formats_utc() -> None:

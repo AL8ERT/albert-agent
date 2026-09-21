@@ -1,10 +1,18 @@
-/* 应用整体布局：固定最大宽度，头部/消息区/输入框纵向排列 */
+/* 应用整体布局：横向 = 历史侧栏 + 主区（纵向：头部/消息区/输入框） */
 .app {
   height: 100%;
   width: 100%;
+  display: flex;
+  flex-direction: row;
+  background: var(--bg);
+}
+
+/* 主区：保持原来的居中定宽列，min-width 防止长文本撑破布局 */
+.app-main {
+  flex: 1;
+  min-width: 0;
   max-width: 820px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
 }

@@ -1,12 +1,20 @@
-"""聊天路由：SSE 流式对话 + 读取线程消息。"""
+"""聊天路由：SSE 流式对话 + 历史会话列表 + 读取线程消息。"""
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.assistant import build_system_prompt
 from app.core.config import get_models
-from app.schemas.chat import ChatRequest, ThreadMessagesResponse
-from app.services.chat_service import get_thread_messages, stream_chat_reply
+from app.schemas.chat import (
+    ChatRequest,
+    ThreadListResponse,
+    ThreadMessagesResponse,
+)
+from app.services.chat_service import (
+    get_thread_messages,
+    list_threads,
+    stream_chat_reply,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -49,20 +57,32 @@ async def chat_stream(payload: ChatRequest) -> StreamingResponse:
     )
 
 
+@router.get("/threads", response_model=ThreadListResponse)
+async def get_threads() -> ThreadListResponse:
+    """历史会话列表：每个 thread 聚合最新一条 run，按时间倒序。
+
+    数据来自 agent_run_checkpoints 审计表：未配置 PostgreSQL（内存模式）
+    或读取失败时返回空列表，接口本身不报错——历史属于附加能力。
+    """
+    return ThreadListResponse(threads=await list_threads())
+
+
 @router.get("/threads/{thread_id}")
 async def get_thread(
     thread_id: str,
     model: str | None = None,
 ) -> ThreadMessagesResponse:
-    """读取指定线程在 checkpointer 中的消息，并附带当前系统提示词。
+    """读取指定线程在 checkpointer 中的消息，并附带当前系统提示词与累计用量。
 
     system_prompt 来自配置而非 checkpointer：create_agent 只在调用模型时注入它，
     因此 state 里没有；这里单独返回，让前端可以完整查看"实际使用的提示词"。
+    total_usage 与 SSE done 事件同口径，前端切换历史会话时可直接展示。
     """
     model_name = _resolve_model(model)
-    messages = await get_thread_messages(model_name, thread_id)
+    messages, total_usage = await get_thread_messages(model_name, thread_id)
     return ThreadMessagesResponse(
         thread_id=thread_id,
         system_prompt=build_system_prompt(),
         messages=messages,
+        total_usage=total_usage,
     )

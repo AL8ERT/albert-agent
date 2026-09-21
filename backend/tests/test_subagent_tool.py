@@ -1,6 +1,8 @@
 """use_subagent 工具测试：子 agent 只把最终答案返回给主 agent。
 
 用假模型 + 假子 agent 名单替换外部依赖，不访问真实模型或用户配置。
+返回值为 ToolMessage：正文是最终答案，子 agent 用量合计挂在
+additional_kwargs["subagent_usage"] 上供主流统计并入。
 """
 
 import asyncio
@@ -8,18 +10,32 @@ from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langgraph.prebuilt import ToolRuntime
 from pytest import MonkeyPatch
 
 from app.agents.prompts import build_subagent_system_prompt
 from app.core.config import SubagentConfig
+from app.core.usage import SUBAGENT_USAGE_KEY
 from app.subagents import tool as subagent_tool
 from app.tools.builtins import get_current_time
 
 _DEFAULT_SUBAGENTS = [
     SubagentConfig(name="general", prompt="General tasks"),
 ]
+
+
+def _fake_runtime() -> ToolRuntime:
+    """直接 ainvoke 时手工构造的 ToolRuntime：只需 tool_call_id，其余占位。"""
+    return ToolRuntime(
+        state=None,
+        context=None,
+        config={},
+        stream_writer=lambda chunk: None,
+        tool_call_id="call-sub",
+        store=None,
+    )
 
 
 class _NoopMiddleware(AgentMiddleware):
@@ -88,7 +104,7 @@ def _patch_subagents(
 
 
 def test_use_subagent_returns_only_final_answer(monkeypatch: MonkeyPatch) -> None:
-    """子 agent 内部有工具调用时，工具只返回最终答案文本。"""
+    """子 agent 内部有工具调用时，工具只返回最终答案文本与用量合计。"""
     model = _ScriptedModel(
         replies=[
             AIMessage(
@@ -96,8 +112,21 @@ def test_use_subagent_returns_only_final_answer(monkeypatch: MonkeyPatch) -> Non
                 tool_calls=[
                     {"name": "get_current_time", "args": {}, "id": "call-1"}
                 ],
+                usage_metadata={
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "total_tokens": 12,
+                },
             ),
-            AIMessage(content="final answer"),
+            AIMessage(
+                content="final answer",
+                usage_metadata={
+                    "input_tokens": 20,
+                    "output_tokens": 5,
+                    "total_tokens": 25,
+                    "input_token_details": {"cached_tokens": 8},
+                },
+            ),
         ]
     )
     _patch_subagents(monkeypatch)
@@ -106,10 +135,25 @@ def test_use_subagent_returns_only_final_answer(monkeypatch: MonkeyPatch) -> Non
     )
 
     result = asyncio.run(
-        use_subagent.ainvoke({"agent_name": "general", "message": "do the task"})
+        use_subagent.ainvoke(
+            {
+                "agent_name": "general",
+                "message": "do the task",
+                "runtime": _fake_runtime(),
+            }
+        )
     )
 
-    assert result == "final answer"
+    assert isinstance(result, ToolMessage)
+    assert result.content == "final answer"
+    assert result.tool_call_id == "call-sub"
+    # 子 agent 两次模型调用的用量合计（第二次 20 扣除缓存 8 后为 12）
+    assert result.additional_kwargs[SUBAGENT_USAGE_KEY] == {
+        "input_tokens": 22,
+        "output_tokens": 7,
+        "total_tokens": 37,
+        "cached_tokens": 8,
+    }
     # 子 agent 使用传入的工具全集，且不含 use_subagent 自身
     assert model.bound
     assert all(names == ["get_current_time"] for names in model.bound)
@@ -135,11 +179,20 @@ def test_use_subagent_unknown_name_lists_available(
     use_subagent = subagent_tool.create_subagent_tool(model=model, tools=[])
 
     result = asyncio.run(
-        use_subagent.ainvoke({"agent_name": "nope", "message": "hi"})
+        use_subagent.ainvoke(
+            {
+                "agent_name": "nope",
+                "message": "hi",
+                "runtime": _fake_runtime(),
+            }
+        )
     )
 
-    assert "Unknown subagent 'nope'" in result
-    assert "general" in result and "writer" in result
+    assert isinstance(result, ToolMessage)
+    assert "Unknown subagent 'nope'" in result.content
+    assert "general" in result.content and "writer" in result.content
+    # 未真正执行子 agent，不带用量
+    assert SUBAGENT_USAGE_KEY not in result.additional_kwargs
     assert model.calls == 0
 
 
@@ -151,7 +204,15 @@ def test_use_subagent_reports_failure(monkeypatch: MonkeyPatch) -> None:
     )
 
     result = asyncio.run(
-        use_subagent.ainvoke({"agent_name": "general", "message": "hi"})
+        use_subagent.ainvoke(
+            {
+                "agent_name": "general",
+                "message": "hi",
+                "runtime": _fake_runtime(),
+            }
+        )
     )
 
-    assert result.startswith("Subagent 'general' failed: model down")
+    assert isinstance(result, ToolMessage)
+    assert result.content.startswith("Subagent 'general' failed: model down")
+    assert result.tool_call_id == "call-sub"

@@ -1,4 +1,4 @@
-"""内置工具：当前时间、网页搜索与文件读取。
+"""内置工具：当前时间、网页搜索、文件读取与数学计算。
 
 这些工具与 MCP 工具一样直接挂到 create_agent 的 tools 列表里；
 网页搜索走 DuckDuckGo（ddgs），无需 API Key。
@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+import ast
 import logging
+import math
+import operator
+from collections.abc import Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -20,6 +24,116 @@ logger = logging.getLogger(__name__)
 # 单次读取上限：超过则拒绝，避免把大文件/二进制塞进上下文
 MAX_READ_BYTES = 2_000_000
 MAX_READ_LINES = 2000
+
+# 数学表达式安全求值的上限：防超长输入与超大幂运算阻塞进程
+MAX_EXPRESSION_LENGTH = 1000
+MAX_EXPONENT = 10_000  # ** 指数绝对值上限（9**9**9 这类链式幂会被此规则拦截）
+MAX_RESULT_BITS = 40_000  # 整数结果位数上限（约 1.2 万位十进制）
+
+
+_CALC_BINOPS: dict[type, Callable[[float, float], float]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_CALC_UNARYOPS: dict[type, Callable[[float], float]] = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+_CALC_FUNCTIONS: dict[str, Callable] = {
+    "abs": abs,
+    "round": round,
+    "min": min,
+    "max": max,
+    "pow": pow,
+    "sqrt": math.sqrt,
+    "cbrt": math.cbrt,
+    "exp": math.exp,
+    "log": math.log,
+    "log2": math.log2,
+    "log10": math.log10,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "asin": math.asin,
+    "acos": math.acos,
+    "atan": math.atan,
+    "sinh": math.sinh,
+    "cosh": math.cosh,
+    "tanh": math.tanh,
+    "floor": math.floor,
+    "ceil": math.ceil,
+    "factorial": math.factorial,
+}
+_CALC_CONSTANTS: dict[str, float] = {"pi": math.pi, "e": math.e, "tau": math.tau}
+
+
+def _eval_calc_node(node: ast.AST) -> int | float:
+    """递归求值 AST 节点：只放行白名单内的运算符、函数与常量。
+
+    任何其他节点（属性访问、字符串、下标、lambda 等）都会抛 ValueError，
+    因此 `__import__`、`os.system` 之类的注入无法通过。
+    """
+    if isinstance(node, ast.Expression):
+        return _eval_calc_node(node.body)
+    if isinstance(node, ast.Constant):
+        # bool 是 int 的子类，需显式排除；字符串/None 等一律拒绝
+        if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            return node.value
+        raise ValueError("只允许数字常量")
+    if isinstance(node, ast.BinOp) and type(node.op) in _CALC_BINOPS:
+        left = _eval_calc_node(node.left)
+        right = _eval_calc_node(node.right)
+        if isinstance(node.op, ast.Pow) and abs(right) > MAX_EXPONENT:
+            raise ValueError(f"指数绝对值超过 {MAX_EXPONENT}，拒绝计算")
+        return _CALC_BINOPS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_UNARYOPS:
+        return _CALC_UNARYOPS[type(node.op)](_eval_calc_node(node.operand))
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _CALC_FUNCTIONS
+    ):
+        if node.keywords:
+            raise ValueError("不支持关键字参数")
+        args = [_eval_calc_node(arg) for arg in node.args]
+        return _CALC_FUNCTIONS[node.func.id](*args)
+    if isinstance(node, ast.Name) and node.id in _CALC_CONSTANTS:
+        return _CALC_CONSTANTS[node.id]
+    raise ValueError("不支持的表达式元素")
+
+
+@tool
+def calculate(expression: str) -> str:
+    """计算数学表达式并返回结果（精确计算请优先使用本工具，不要心算）。
+
+    支持：四则运算 + - * /、整除 //、取余 %、乘方 **、括号、一元正负号；
+    函数 sqrt/cbrt/exp/log/log2/log10/sin/cos/tan/asin/acos/atan/sinh/cosh/tanh/
+    floor/ceil/abs/round/min/max/pow/factorial；常量 pi/e/tau。
+    幂运算写 **（不是 ^）。log 默认自然对数，可传底数如 log(8, 2)。
+
+    Args:
+        expression: 数学表达式，如 "(1 + 2) * 3 ** 2"、"sqrt(16) + pi"。
+    """
+    expression = expression.strip()
+    if not expression or len(expression) > MAX_EXPRESSION_LENGTH:
+        return f"计算失败：表达式为空或超过 {MAX_EXPRESSION_LENGTH} 字符"
+    try:
+        tree = ast.parse(expression, mode="eval")
+        result = _eval_calc_node(tree)
+    except (SyntaxError, ValueError, ZeroDivisionError, OverflowError) as exc:
+        return f"计算失败：{exc}"
+    if isinstance(result, complex):
+        return "计算失败：结果为复数"
+    if isinstance(result, float) and (math.isinf(result) or math.isnan(result)):
+        return "计算失败：结果超出可表示范围"
+    if isinstance(result, int) and result.bit_length() > MAX_RESULT_BITS:
+        return f"计算失败：整数结果超过 {MAX_RESULT_BITS} 个二进制位"
+    return f"{expression} = {result}"
 
 
 @tool

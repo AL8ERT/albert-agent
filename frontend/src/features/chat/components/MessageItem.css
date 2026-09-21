@@ -27,7 +27,8 @@
   max-width: 88%;
 }
 
-/* 助手文本段落：浅色气泡，自动换行、保留空白字符 */
+/* 助手文本段落：浅色气泡，内部交给 Markdown 排版（不再 pre-wrap，
+   否则会保留渲染后 HTML 的换行空白，导致段落间距异常） */
 .assistant-text {
   max-width: 100%;
   padding: 10px 14px;
@@ -35,7 +36,6 @@
   border-bottom-left-radius: 4px;
   background: var(--assistant-bg);
   color: var(--text);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -50,4 +50,12 @@
   to {
     visibility: hidden;
   }
+}
+
+/* assistant 消息底部的 token 用量小字（流结束才出现） */
+.assistant-usage {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px;
+  white-space: nowrap;
 }

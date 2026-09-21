@@ -1,0 +1,57 @@
+/* 思维链折叠面板：套 ToolCallCard 的卡片范式，配色弱化（--muted），
+   与正文（assistant-text 气泡）和工具卡片在视觉上区分开 */
+
+.reasoning-block {
+  align-self: stretch;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+/* 头部：整行可点击的切换按钮 */
+.reasoning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.reasoning-header:hover {
+  color: var(--text);
+}
+
+/* 思考中的标题：呼吸闪烁提示进行中 */
+.reasoning-title.thinking {
+  animation: reasoning-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes reasoning-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 展开箭头：跟随开合状态切换方向 */
+.reasoning-chevron {
+  font-size: 12px;
+}
+
+/* 思考正文：弱化字号与颜色，限高滚动，Markdown 渲染 */
+.reasoning-body {
+  padding: 4px 12px 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 13px;
+  color: var(--muted);
+  max-height: 260px;
+  overflow-y: auto;
+}

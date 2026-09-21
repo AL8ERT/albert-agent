@@ -50,6 +50,20 @@ VALUES (%s, %s, %s, %s, %s, %s)
 ON CONFLICT (thread_id, checkpoint_id) DO NOTHING
 """
 
+# 历史会话列表：每个 thread 只取最新一条 run（DISTINCT ON + 内层按时间取最新），
+# 外层再按时间倒序排会话。messages 一并带出，供服务层提取会话标题（首条用户消息）。
+_LIST_THREAD_RUNS = f"""
+SELECT thread_id, model, message_count, messages, created_at
+FROM (
+    SELECT DISTINCT ON (thread_id)
+        thread_id, model, message_count, messages, created_at
+    FROM {RUN_CHECKPOINTS_TABLE}
+    ORDER BY thread_id, created_at DESC
+) AS latest_per_thread
+ORDER BY created_at DESC
+LIMIT %s
+"""
+
 # 模块级单例：由 FastAPI lifespan 在启动/关闭时初始化和释放
 _pool: AsyncConnectionPool | None = None
 _checkpointer: AsyncPostgresSaver | None = None
@@ -122,6 +136,32 @@ def get_checkpointer() -> BaseCheckpointSaver:
     if _fallback_checkpointer is None:
         _fallback_checkpointer = InMemorySaver()
     return _fallback_checkpointer
+
+
+# 每个会话最新一条 run 的原始数据（历史会话列表的数据源）
+ThreadRunRow = tuple[str, str, int, list[dict[str, Any]], Any]
+
+
+async def list_thread_runs(limit: int = 50) -> list[ThreadRunRow]:
+    """读取历史会话列表：每个 thread 取最新一条 run，按时间倒序。
+
+    返回原始行 (thread_id, model, message_count, messages, created_at)，
+    标题提取等展示逻辑由服务层负责。未配置数据库时返回空列表
+    （内存模式没有审计表，自然也没有历史）。
+    """
+    if _pool is None:
+        return []
+    try:
+        async with _pool.connection() as conn:
+            cursor = await conn.execute(_LIST_THREAD_RUNS, (limit,))
+            rows = await cursor.fetchall()
+            return [
+                (row[0], row[1], row[2], row[3], row[4]) for row in rows
+            ]
+    except Exception:
+        # 列表属于附加能力：读失败只记日志，向上返回空列表而不是让接口报错
+        logger.exception("Failed to list thread runs")
+        return []
 
 
 async def save_run_checkpoint(

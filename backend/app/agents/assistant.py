@@ -11,7 +11,8 @@ from functools import lru_cache
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain_openai import ChatOpenAI
+
+from app.agents.chat_model import ReasoningChatOpenAI
 
 from app.agents.prompts import build_system_prompt
 from app.core.config import find_model, get_settings
@@ -40,13 +41,18 @@ def get_agent(model_name: str) -> Any:
         raise RuntimeError(f"No API key configured for model {model_name!r}.")
 
     settings = get_settings()
-    # 兼容 OpenAI 协议的服务（DeepSeek 等）统一用 ChatOpenAI + 自定义 base_url
-    model = ChatOpenAI(
+    # 兼容 OpenAI 协议的服务（DeepSeek 等）统一用 ChatOpenAI + 自定义 base_url；
+    # ReasoningChatOpenAI 在其基础上保留第三方 provider 的 reasoning_content
+    # （思维链增量），供 SSE 层以 reasoning 事件推送给前端
+    model = ReasoningChatOpenAI(
         model=model_config.name,
         api_key=model_config.api_key,
         base_url=model_config.base_url,
         temperature=settings.llm_temperature,
         streaming=True,  # 必须开启流式，SSE 才能逐 token 推送
+        # 自定义 base_url 时 langchain-openai 默认不带 stream_options.include_usage，
+        # 显式开启后每次模型调用的最终 chunk 会携带 usage_metadata（含缓存命中）
+        stream_usage=True,
     )
     # 子 agent 复用主 agent 的模型与全部常规工具，但不挂 use_subagent（避免递归）
     base_tools = [*get_builtin_tools(), *get_mcp_tools()]
