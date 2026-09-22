@@ -29,6 +29,8 @@ USER_CONFIG_FILENAME = "albert-agent-config.json"
 
 # 系统内置的通用任务子 agent；用户配置同名子 agent 时以用户配置为准。
 DEFAULT_SUBAGENT_NAME = "general"
+# 提示词译文：你是一个通用子 agent。使用可用的技能与工具独立完成委派的任务，
+# 然后只返回最终答案。
 DEFAULT_SUBAGENT_PROMPT = (
     "You are a general-purpose subagent. Complete the delegated task "
     "independently using the available skills and tools, then return only the "
@@ -183,6 +185,7 @@ class Settings(BaseSettings):
     # PostgreSQL 连接串；为空时 checkpointer 回退为内存实现
     database_url: str = ""
 
+    # 默认系统提示词译文：你是 Albert，一个乐于助人且简洁的助手。
     agent_system_prompt: str = "You are Albert, a helpful and concise assistant."
     llm_temperature: float = 0.7
 

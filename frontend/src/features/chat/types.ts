@@ -107,6 +107,20 @@ export type TokenUsage = {
   cached_tokens: number
 }
 
+/** 待办事项优先级（后端 todolist 工具的枚举值）。 */
+export type TodoPriority = 'low' | 'medium' | 'high'
+
+/** 待办事项状态（后端 todolist 工具的枚举值）。 */
+export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'abandoned'
+
+/** 单个待办事项（todolist 工具入参的结构）。 */
+export type TodoItem = {
+  /** 事项名 */
+  content: string
+  priority: TodoPriority
+  status: TodoStatus
+}
+
 /** SSE 流中的事件类型。 */
 export type ChatStreamEvent =
   | { type: 'token'; content: string; message_id?: string | null }

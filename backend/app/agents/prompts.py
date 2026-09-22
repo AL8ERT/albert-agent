@@ -35,12 +35,35 @@ DELEGATION_NOTE = (
 )
 
 
+# 待办事项说明：只注入主 agent 的系统提示词（子 agent 不挂载 todolist 工具）。
+# 译文：主动用 todolist 工具管理复杂或多步骤的工作：任务包含 3 个及以上独立
+# 步骤、或用户一次给出多个任务时，先拆解出待办列表再动手。执行期间实时维护：
+# 同一时间只保持一项 in_progress；工作真正做完（含必要验证）后才标 completed，
+# 不要凭意图批量标记完成；被阻塞的事项保持 in_progress，并追加一条描述阻塞
+# 原因的后续待办。每次调用都整表替换 —— 必须传入完整的最新列表，而不是只传
+# 变化项。简单或纯咨询型任务不需要待办列表。
+TODO_NOTE = (
+    "\n\nProactively manage complex or multi-step work with the todolist tool: "
+    "when a task involves 3 or more distinct steps (not several tool calls for "
+    "one conceptual step), or the user provides several tasks at once, break "
+    "the work into a todo list before starting. Maintain it in real time as "
+    "you work: keep only one item in_progress at a time; mark an item "
+    "completed only after the work is actually done, including any required "
+    "verification — never batch completions based on intent alone; when "
+    "blocked or partial, keep the item in_progress and append a follow-up "
+    "item describing the blocker. Each call replaces the whole list, so "
+    "always pass the complete current list, not just the changed items. Skip "
+    "the todo list for simple or purely conversational tasks."
+)
+
+
 def build_system_prompt() -> str:
-    """返回主 agent 实际使用的系统提示词（用户配置 + 框架标签与委派说明）。"""
+    """返回主 agent 实际使用的系统提示词（用户配置 + 框架标签、委派与待办说明）。"""
     return (
         f"{get_settings().agent_system_prompt}"
         f"{FRAMEWORK_CONTEXT_NOTE}"
         f"{DELEGATION_NOTE}"
+        f"{TODO_NOTE}"
     )
 
 

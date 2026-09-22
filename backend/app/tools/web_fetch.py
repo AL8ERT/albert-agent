@@ -117,15 +117,23 @@ def _format_body(body: bytes, content_type: str, base_url: str, max_chars: int) 
     return text
 
 
+# 工具描述译文（模型看到的是英文，此注释供维护者对照）：
+# 抓取网页正文；HTML 会转成 Markdown，链接为绝对地址，可用返回的链接继续抓取。
+# 仅允许访问 https 且位于配置白名单（webFetchAllowedDomains）内的域名。
+# 参数 url：要抓取的完整 URL（必须 https）；max_chars：返回正文的最大字符数
+# （默认 20000，上限 100000）。
 @tool
 def web_fetch(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
-    """抓取网页正文；HTML 会转成 Markdown，链接为绝对地址，可用返回的链接继续抓取。
+    """Fetch a web page's main content; HTML is converted to Markdown with
+    absolute link URLs, which can be fetched in turn.
 
-    仅允许访问 https 且位于配置白名单（webFetchAllowedDomains）内的域名。
+    Only https domains on the configured allowlist (webFetchAllowedDomains)
+    are allowed.
 
     Args:
-        url: 要抓取的完整 URL（必须 https）。
-        max_chars: 返回正文的最大字符数（默认 20000，上限 100000）。
+        url: The full URL to fetch (https only).
+        max_chars: Maximum characters of body text to return
+            (default 20000, cap 100000).
     """
     max_chars = max(1000, min(int(max_chars), MAX_MAX_CHARS))
     try:

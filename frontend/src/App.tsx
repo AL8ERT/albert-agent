@@ -9,6 +9,7 @@ import { ChatHeader } from '@/features/chat/components/ChatHeader'
 import { MessageInspector } from '@/features/chat/components/MessageInspector'
 import { MessageList } from '@/features/chat/components/MessageList'
 import { ThreadSidebar } from '@/features/chat/components/ThreadSidebar'
+import { TodoListPanel } from '@/features/chat/components/TodoListPanel'
 import { useChat } from '@/features/chat/hooks/useChat'
 import './App.css'
 
@@ -40,6 +41,9 @@ function App() {
     bottomRef,
     sendMessage,
     startNewChat,
+    todoList,
+    todoPanelOpen,
+    toggleTodoPanel,
   } = useChat()
 
   return (
@@ -73,6 +77,14 @@ function App() {
           error={error}
           bottomRef={bottomRef}
         />
+        {/* agent 调用过 todolist 工具后常驻展示（可折叠隐藏）的待办面板 */}
+        {todoList !== null && (
+          <TodoListPanel
+            items={todoList}
+            open={todoPanelOpen}
+            onToggle={toggleTodoPanel}
+          />
+        )}
         {/* disabled 控制流式回复期间禁止再次发送 */}
         <ChatComposer
           disabled={isStreaming}

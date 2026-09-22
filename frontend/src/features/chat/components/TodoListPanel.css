@@ -1,0 +1,116 @@
+/* 待办事项面板：消息区与输入框之间的常驻区块，可折叠成一行头部 */
+.todo-panel {
+  flex: none;
+  margin: 0 20px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+/* 头部按钮：占满整行，点击切换折叠 / 展开 */
+.todo-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.todo-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.todo-progress {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.todo-chevron {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 条目列表：超长时自身滚动，不挤压消息区 */
+.todo-list {
+  margin: 0;
+  padding: 2px 14px 10px;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.todo-empty {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+/* 状态图标：进行中用主题色，已完成用绿色，其余弱化 */
+.todo-status-icon {
+  flex: none;
+  width: 1.2em;
+  text-align: center;
+  color: var(--muted);
+}
+
+.todo-item.in_progress .todo-status-icon {
+  color: var(--accent);
+}
+
+.todo-item.completed .todo-status-icon {
+  color: #16a34a;
+}
+
+.todo-item.in_progress .todo-content {
+  font-weight: 500;
+}
+
+/* 已完成 / 已放弃：划线并淡化 */
+.todo-item.completed .todo-content,
+.todo-item.abandoned .todo-content {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.todo-content {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 优先级徽标：默认灰色，中 / 高逐级加重 */
+.todo-priority {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--assistant-bg);
+}
+
+.todo-priority.medium {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.todo-priority.high {
+  color: var(--error);
+  background: var(--error-bg);
+}

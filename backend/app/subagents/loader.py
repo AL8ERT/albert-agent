@@ -46,6 +46,8 @@ def render_subagent_update(
     added: Iterable[SubagentConfig], removed: Iterable[str]
 ) -> str:
     """渲染后续轮次注入消息尾部的 <subagent_update> 段（只含增删差分）。"""
+    # 注入文本为英文："Added subagents:"（新增子 agent：）/
+    # "Removed subagents:"（移除子 agent：）
     added_items = list(added)
     removed_items = list(removed)
     lines = ["<subagent_update>"]

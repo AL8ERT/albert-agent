@@ -82,6 +82,12 @@ def create_subagent_tool(model: BaseChatModel, tools: list[BaseTool]) -> BaseToo
         # 会报 "tool_call_id: Field required"）。
         runtime: Annotated[ToolRuntime, InjectedToolArg()],
     ) -> ToolMessage:
+        # 工具描述译文（模型看到的是英文，此注释供维护者对照）：
+        # 把任务委派给子 agent 并返回其最终答案。子 agent 拥有相同的技能与工具，
+        # 但看不到当前对话，所以要把所需的全部细节都写进任务描述里；只有子 agent
+        # 的最终答案会返回，其内部中间步骤保持隐藏。
+        # 参数 agent_name：要调用的子 agent 名称，与 <available_subagents> 中
+        # 列出的完全一致；message：包含全部所需上下文的完整任务描述。
         """Delegate a task to a subagent and return its final answer.
 
         The subagent runs with the same skills and tools, but cannot see this

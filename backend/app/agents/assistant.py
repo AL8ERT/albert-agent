@@ -24,7 +24,16 @@ from app.subagents.middleware import SubagentMiddleware
 from app.subagents.tool import create_subagent_tool
 from app.tools import get_builtin_tools
 
-__all__ = ["build_system_prompt", "get_agent"]
+__all__ = ["build_system_prompt", "filter_subagent_tools", "get_agent"]
+
+# 子 agent 不挂载的内置工具：todolist 面板只镜像主线程最新一次调用，
+# 子 agent 的调用不会反映到前端，挂载只会白白消耗 token
+SUBAGENT_EXCLUDED_TOOLS = frozenset({"todolist"})
+
+
+def filter_subagent_tools(tools: list) -> list:
+    """过滤子 agent 可用的工具列表（剔除不参与子 agent 执行的内置工具）。"""
+    return [item for item in tools if item.name not in SUBAGENT_EXCLUDED_TOOLS]
 
 
 @lru_cache
@@ -55,12 +64,16 @@ def get_agent(model_name: str) -> Any:
         stream_usage=True,
     )
     # 子 agent 复用主 agent 的模型与全部常规工具，但不挂 use_subagent（避免递归）
+    # 与 todolist（主线程看板，见 SUBAGENT_EXCLUDED_TOOLS）
     base_tools = [*get_builtin_tools(), *get_mcp_tools()]
     # system_prompt 由 create_agent 在调用模型时注入，不写入 checkpoint；
     # checkpointer 负责多轮对话的历史持久化，按 config.configurable.thread_id 隔离。
     return create_agent(
         model=model,
-        tools=[*base_tools, create_subagent_tool(model=model, tools=base_tools)],
+        tools=[
+            *base_tools,
+            create_subagent_tool(model=model, tools=filter_subagent_tools(base_tools)),
+        ],
         system_prompt=build_system_prompt(),
         middleware=[
             GuardianMiddleware(),

@@ -16,13 +16,14 @@ def _allow_tmp_reads(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
 
 
 def test_builtin_tools_are_registered() -> None:
-    """内置工具集合应包含计算、时间、搜索、读文件与抓网页。"""
+    """内置工具集合应包含计算、时间、搜索、读文件、抓网页与待办事项。"""
     assert {tool.name for tool in get_builtin_tools()} == {
         "calculate",
         "get_current_time",
         "web_search",
         "read_file",
         "web_fetch",
+        "todolist",
     }
 
 

@@ -57,7 +57,16 @@ agent 默认挂载以下工具：
 | `web_search` | DuckDuckGo 网页搜索（`ddgs`，无需 API Key），返回标题/链接/摘要 |
 | `read_file` | 读取文本文件（支持 `~` 展开、offset/limit 分页，拒绝二进制与超大文件），用于加载 SKILL.md 正文 |
 | `web_fetch` | 抓取白名单域名的 https 页面，HTML 转 Markdown（链接转绝对地址），可顺着返回的链接继续抓取 |
+| `todolist` | 创建 / 更新待办事项列表（整表替换）：入参为条目数组，每项含事项名、优先级（`low`/`medium`/`high`）与状态（`pending`/`in_progress`/`completed`/`abandoned`），见下文「待办事项」 |
 | `use_subagent` | 调用子 agent（传入 agent 名与消息），只把最终答案返回主 agent（`app/subagents/tool.py`） |
+
+### 待办事项（todolist）
+
+`todolist` 是复杂任务的工作看板，创建与更新共用同一工具，**整表替换**语义：每次调用传入当前完整列表（不是增量），传空数组表示清空；列表规模上限 50 项、单条事项名上限 200 字符，空白事项名 / 非法枚举会以 error 工具结果返回（抛 `ValueError` / pydantic 校验失败），模型可自行重试。
+
+- 系统提示词（`app/agents/prompts.py` 的 `TODO_NOTE`）与工具描述（docstring）共同构成使用指引：任务包含 3 个及以上独立步骤、或用户一次给出多个任务时**主动**建列表；执行期间实时维护——同一时间只保持一项 `in_progress`，工作真正做完（含必要验证）后才标 `completed`（禁止凭意图批量标完成），被阻塞的事项保持 `in_progress` 并追加描述阻塞原因的后续待办；简单 / 纯咨询型任务不使用；
+- **无独立服务端状态**：当前列表即最新一次成功调用的入参，随 checkpointer 持久化。前端复用现有 `tool_call` / `tool_result` SSE 事件捕获该工具的调用并渲染常驻面板（无新增事件类型），切换历史会话时从消息里的工具调用记录重建；
+- 子 agent 不挂载 `todolist`（`app/agents/assistant.py` 的 `filter_subagent_tools`）：待办面板只镜像主线程的调用，子 agent 调用不会反映到前端。
 
 ### Guardian 安全策略
 
@@ -314,6 +323,7 @@ app/
 ├─ agents/chat_model.py     # ReasoningChatOpenAI：保留第三方 provider 的思维链增量
 ├─ agents/prompts.py        # 主 agent / 子 agent 系统提示词（静态框架说明）
 ├─ tools/builtins.py        # 内置工具：数学计算 / 当前时间 / 网页搜索 / 文件读取
+├─ tools/todolist.py        # todolist：待办事项整表替换（复杂任务的工作看板）
 ├─ tools/web_fetch.py       # web_fetch：白名单域名抓取 + HTML 转 Markdown
 ├─ security/guard.py        # read_file 路径与 web_fetch URL 校验规则
 ├─ security/middleware.py   # GuardianMiddleware：工具执行前拦截

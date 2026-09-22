@@ -107,17 +107,28 @@ def _eval_calc_node(node: ast.AST) -> int | float:
     raise ValueError("不支持的表达式元素")
 
 
+# 工具描述译文（模型看到的是英文，此注释供维护者对照）：
+# 计算数学表达式并返回结果（精确计算请优先使用本工具，不要心算）。
+# 支持：四则运算 + - * /、整除 //、取余 %、乘方 **、括号、一元正负号；
+# 函数 sqrt/cbrt/exp/log/log2/log10/sin/cos/tan/asin/acos/atan/sinh/cosh/tanh/
+# floor/ceil/abs/round/min/max/pow/factorial；常量 pi/e/tau。
+# 幂运算写 **（不是 ^）。log 默认自然对数，可传底数如 log(8, 2)。
+# 参数 expression：数学表达式，如 "(1 + 2) * 3 ** 2"、"sqrt(16) + pi"。
 @tool
 def calculate(expression: str) -> str:
-    """计算数学表达式并返回结果（精确计算请优先使用本工具，不要心算）。
+    """Evaluate a math expression and return the result (prefer this tool for
+    exact arithmetic; do not compute in your head).
 
-    支持：四则运算 + - * /、整除 //、取余 %、乘方 **、括号、一元正负号；
-    函数 sqrt/cbrt/exp/log/log2/log10/sin/cos/tan/asin/acos/atan/sinh/cosh/tanh/
-    floor/ceil/abs/round/min/max/pow/factorial；常量 pi/e/tau。
-    幂运算写 **（不是 ^）。log 默认自然对数，可传底数如 log(8, 2)。
+    Supports: arithmetic + - * /, floor division //, modulo %, power **,
+    parentheses, unary plus/minus; functions sqrt/cbrt/exp/log/log2/log10/
+    sin/cos/tan/asin/acos/atan/sinh/cosh/tanh/floor/ceil/abs/round/min/max/
+    pow/factorial; constants pi/e/tau. Use ** for exponentiation (not ^).
+    log is the natural logarithm by default and accepts a base, e.g.
+    log(8, 2).
 
     Args:
-        expression: 数学表达式，如 "(1 + 2) * 3 ** 2"、"sqrt(16) + pi"。
+        expression: The math expression, e.g. "(1 + 2) * 3 ** 2" or
+            "sqrt(16) + pi".
     """
     expression = expression.strip()
     if not expression or len(expression) > MAX_EXPRESSION_LENGTH:
@@ -136,13 +147,15 @@ def calculate(expression: str) -> str:
     return f"{expression} = {result}"
 
 
+# 工具描述译文：获取当前日期和时间。参数 timezone：可选 IANA 时区名
+# （如 Asia/Shanghai、America/New_York），缺省使用运行环境的本地时区。
 @tool
 def get_current_time(timezone: str | None = None) -> str:
-    """获取当前日期和时间。
+    """Get the current date and time.
 
     Args:
-        timezone: 可选 IANA 时区名（如 Asia/Shanghai、America/New_York），
-            缺省使用运行环境的本地时区。
+        timezone: Optional IANA timezone name (e.g. Asia/Shanghai,
+            America/New_York); defaults to the local timezone of the runtime.
     """
     try:
         now = (
@@ -155,13 +168,15 @@ def get_current_time(timezone: str | None = None) -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S %Z (%A)")
 
 
+# 工具描述译文：搜索互联网，返回若干条网页的标题、链接与摘要。
+# 参数 query：搜索关键词；max_results：返回结果条数（1-10，默认 5）。
 @tool
 def web_search(query: str, max_results: int = 5) -> str:
-    """搜索互联网，返回若干条网页的标题、链接与摘要。
+    """Search the internet and return titles, links and snippets of web pages.
 
     Args:
-        query: 搜索关键词。
-        max_results: 返回结果条数（1-10，默认 5）。
+        query: The search keywords.
+        max_results: Number of results to return (1-10, default 5).
     """
     max_results = max(1, min(int(max_results), 10))
     try:
@@ -183,14 +198,18 @@ def web_search(query: str, max_results: int = 5) -> str:
     return "\n".join(lines)
 
 
+# 工具描述译文：读取文本文件内容（用于查看 SKILL.md、配置文件、代码等）。
+# 参数 path：文件路径，支持 ~ 展开；offset：起始行号（从 0 开始，默认 0）；
+# limit：最多返回的行数（默认 2000）。
 @tool
 def read_file(path: str, offset: int = 0, limit: int = MAX_READ_LINES) -> str:
-    """读取文本文件内容（用于查看 SKILL.md、配置文件、代码等）。
+    """Read the content of a text file (for viewing SKILL.md, config files,
+    code, etc.).
 
     Args:
-        path: 文件路径，支持 ~ 展开。
-        offset: 起始行号（从 0 开始，默认 0）。
-        limit: 最多返回的行数（默认 2000）。
+        path: The file path; ~ expansion is supported.
+        offset: Starting line number (0-based, default 0).
+        limit: Maximum number of lines to return (default 2000).
     """
     try:
         target = validate_read_path(path)

@@ -10,6 +10,8 @@ token 用量统计：每轮流结束（SSE `done` 事件）后，assistant 消�
 
 历史对话：顶部栏「历史」按钮打开左侧会话列表（标题 / 相对时间 / 消息数，当前会话高亮），点击即可切换——消息与工具卡片结果按 `tool_call_id` 重建，会话累计用量一并恢复，之后继续发消息即在该会话上下文中进行。列表来自后端审计表聚合，**未配置 PostgreSQL 时列表为空**（见后端 README）。
 
+待办事项面板：agent 调用 `todolist` 工具后，消息区与输入框之间常驻展示待办列表（条目含状态图标、事项名与优先级徽标，已完成 / 已放弃划线淡化），点击头部可折叠隐藏（折叠后仍保留一行进度摘要）。该工具为整表替换语义，前端只提交成功执行的最新一次调用入参（复用 `tool_call` / `tool_result` 事件，无新增 SSE 事件类型）；agent 每次成功更新会重新展开面板，切换历史会话时从消息里的工具调用记录恢复当前列表，「新对话」时清空。
+
 ## 环境要求
 
 - Node.js 20.19+ / 22.12+（本机使用 v24）
@@ -50,7 +52,8 @@ src/
    ├─ hooks/useChat.ts      # 消息/模型/历史会话状态管理，把流事件归组为思维链块、文本段与工具卡片
    ├─ lib/usage.ts          # token 用量的展示格式化
    ├─ lib/history.ts        # 历史消息重建（ThreadMessage -> ChatMessage）与相对时间格式化
-   ├─ components/           # Header / ModelSelector / ThreadSidebar / MessageList / MessageItem / ReasoningBlock / ToolCallCard / Composer
+   ├─ lib/todo.ts           # 待办事项解析（todolist 工具入参）与中文标签
+   ├─ components/           # Header / ModelSelector / ThreadSidebar / MessageList / MessageItem / ReasoningBlock / ToolCallCard / TodoListPanel / Composer
    └─ types.ts              # 领域类型
 ```
 

@@ -111,6 +111,7 @@ def render_skill_update(
     added: Iterable[SkillMetadata], removed: Iterable[str]
 ) -> str:
     """渲染后续轮次注入消息尾部的 <skill_update> 段（只含增删差分）。"""
+    # 注入文本为英文："Added skills:"（新增技能：）/ "Removed skills:"（移除技能：）
     added_items = list(added)
     removed_items = list(removed)
     lines = ["<skill_update>"]

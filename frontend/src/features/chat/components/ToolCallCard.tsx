@@ -26,7 +26,9 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
   // result 为 null 表示后端还没返回 tool_result
   const pending = part.result === null
   const failed = part.status === 'error'
-  const argsText = formatArgs(part.args)
+  // todolist 的入参已由常驻待办面板与结果文本呈现，卡片里不再重复展开 JSON
+  const hideArgs = part.name === 'todolist'
+  const argsText = hideArgs ? '' : formatArgs(part.args)
 
   return (
     <div className={`tool-call${failed ? ' failed' : ''}`}>

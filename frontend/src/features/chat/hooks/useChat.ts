@@ -6,6 +6,7 @@
  * - 维护当前 threadId（会话标识，多轮对话复用同一个 ID）；
  * - 发送消息并把 SSE token 增量写入最后一条 assistant 消息；
  * - 历史会话：拉取会话摘要列表、点击切换（重建消息与累计用量）；
+ * - 待办事项：成功执行的 todolist 工具调用整表替换当前列表，常驻面板展示；
  * - 「查看消息」面板的打开/关闭与数据加载（读取后端 checkpointer）。
  */
 
@@ -17,11 +18,17 @@ import {
   streamChat,
 } from '../api/chatApi'
 import { buildChatMessages } from '../lib/history'
+import {
+  TODOLIST_TOOL_NAME,
+  findLatestTodoArgs,
+  parseTodoArgs,
+} from '../lib/todo'
 import type {
   ChatMessage,
   ChatPart,
   ThreadMessage,
   ThreadSummary,
+  TodoItem,
   TokenUsage,
 } from '../types'
 
@@ -70,6 +77,11 @@ export function useChat() {
   const [historyOpen, setHistoryOpen] = useState(false)
   // 切换历史会话时的消息加载状态（列表本身用 threadsLoading）
   const [switchingThread, setSwitchingThread] = useState(false)
+  // 当前会话的待办事项（todolist 工具最新一次成功调用的入参）；
+  // null 表示尚未调用过工具，不显示面板
+  const [todoList, setTodoList] = useState<TodoItem[] | null>(null)
+  // 待办面板展开 / 折叠（用户可隐藏；agent 每次成功更新会重新展开）
+  const [todoPanelOpen, setTodoPanelOpen] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // 初始化：拉取模型列表，默认选中第一个；组件卸载时中断请求
@@ -133,9 +145,13 @@ export function useChat() {
           threadIdToSelect,
           selectedModel || undefined,
         )
+        const rebuilt = buildChatMessages(data.messages)
         setThreadId(threadIdToSelect)
-        setMessages(buildChatMessages(data.messages))
+        setMessages(rebuilt)
         setThreadUsage(data.total_usage ?? null)
+        // 待办面板随会话恢复：该线程最后一次成功 todolist 调用的入参
+        setTodoList(findLatestTodoArgs(rebuilt))
+        setTodoPanelOpen(true)
         setError(null)
       } catch (err: unknown) {
         // 切换失败保留原会话内容，仅提示错误
@@ -180,6 +196,10 @@ export function useChat() {
           ),
         )
       }
+
+      // todolist 工具调用的待提交入参：tool_call 时暂存，成功执行后才提交。
+      // 失败（如参数被拦截）不提交，避免把无效列表渲染进常驻面板
+      const pendingTodoUpdates = new Map<string, TodoItem[]>()
 
       try {
         const result = await streamChat(content, {
@@ -236,6 +256,12 @@ export function useChat() {
           },
           // LLM 请求调用工具：先插入一张「执行中」的工具卡片
           onToolCall: ({ toolCallId, name, args }) => {
+            if (name === TODOLIST_TOOL_NAME) {
+              const items = parseTodoArgs(args)
+              if (items !== null) {
+                pendingTodoUpdates.set(toolCallId ?? '', items)
+              }
+            }
             updateParts((parts) => [
               ...parts,
               {
@@ -251,9 +277,19 @@ export function useChat() {
           },
           // 工具执行完成：把结果回填到对应的工具卡片
           onToolResult: ({ toolCallId, content, status }) => {
+            const callId = toolCallId ?? ''
+            const pendingTodos = pendingTodoUpdates.get(callId)
+            if (pendingTodos !== undefined) {
+              pendingTodoUpdates.delete(callId)
+              if (status !== 'error') {
+                // 整表替换：最新一次成功调用即当前列表；常驻面板重新展开
+                setTodoList(pendingTodos)
+                setTodoPanelOpen(true)
+              }
+            }
             updateParts((parts) =>
               parts.map((part) =>
-                part.kind === 'tool' && part.callId === (toolCallId ?? '')
+                part.kind === 'tool' && part.callId === callId
                   ? { ...part, result: content, status: status ?? 'success' }
                   : part,
               ),
@@ -309,13 +345,15 @@ export function useChat() {
     [isStreaming, selectedModel, threadId, loadThreads],
   )
 
-  /** 开始新对话：换新的 threadId 并清空消息与用量，旧会话历史仍保留在后端。 */
+  /** 开始新对话：换新的 threadId 并清空消息、用量与待办面板，旧会话历史仍保留在后端。 */
   const startNewChat = useCallback(() => {
     if (isStreaming) return
     setThreadId(crypto.randomUUID())
     setMessages([])
     setError(null)
     setThreadUsage(null)
+    setTodoList(null)
+    setTodoPanelOpen(true)
   }, [isStreaming])
 
   /** 从后端加载当前线程在 checkpointer 中的消息（面板打开和刷新共用）。 */
@@ -376,5 +414,11 @@ export function useChat() {
     bottomRef,
     sendMessage,
     startNewChat,
+    todoList,
+    todoPanelOpen,
+    toggleTodoPanel: useCallback(
+      () => setTodoPanelOpen((open) => !open),
+      [],
+    ),
   }
 }
